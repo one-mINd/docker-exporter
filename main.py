@@ -2,6 +2,7 @@
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from dateutil.parser import isoparse
 import uvicorn
 import docker
 import time
@@ -28,6 +29,8 @@ env = Environment(
     autoescape=select_autoescape(['j2'])
 )
 template = env.get_template(exporter_mode + '_metrics.j2')
+
+last_tasks_cache = {}
 
 async def scrape_containers_info():
     while True:
@@ -73,16 +76,18 @@ async def get_containers():
         cli.close()
     return(t)
 
-async def get_tasks(service):
+async def update_tasks(service):
     t = []
     for task in service.tasks():
-        if task['DesiredState'] == "running":
-            t.append({
-                "id": task['ID'],
-                "desired_state": task['DesiredState'],
-                "status": task['Status']['State']
-            })
-    return(t)
+        t.append({
+            "id": task['ID'],
+            "desired_state": task['DesiredState'],
+            "status": task['Status']['State'],
+            "status_timestamp": isoparse(task['Status']['Timestamp']).timestamp()
+        })
+    if len(t) != 0:
+        global last_tasks_cache
+        last_tasks_cache[service.name] = t 
 
 async def get_services():
     cli = await get_docker_client()
@@ -93,11 +98,13 @@ async def get_services():
             if 'Replicated' in service_inspect["Spec"]["Mode"]:
                 replicas = service_inspect["Spec"]["Mode"]["Replicated"]["Replicas"]
             else: replicas = -1
+            await update_tasks(service=service)
+            tasks = last_tasks_cache.get(service.name, [])
             s.append({
                 "name": service.name,
                 "image": service_inspect['Spec']['TaskTemplate']['ContainerSpec']['Image'],
                 "replicas": replicas,
-                "tasks": await get_tasks(service),
+                "tasks": tasks,
                 "time": int(time.time())
             })
     except Exception as e:
