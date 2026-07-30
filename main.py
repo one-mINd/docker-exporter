@@ -76,6 +76,19 @@ async def get_containers():
         cli.close()
     return(t)
 
+async def is_tasks_newer(tasks: list, service_name: str) -> bool:
+    old_tasks = last_tasks_cache.get(service_name, [])
+    if len(old_tasks) == 0:
+        return True
+
+    newest_task_in_cache = max(old_tasks, key=lambda task: task["status_timestamp"])
+    newest_task = max(tasks, key=lambda task: task["status_timestamp"])
+
+    if newest_task > newest_task_in_cache:
+        return True
+    else:
+        return False
+
 async def update_tasks(service):
     t = []
     for task in service.tasks():
@@ -85,7 +98,8 @@ async def update_tasks(service):
             "status": task['Status']['State'],
             "status_timestamp": isoparse(task['Status']['Timestamp']).timestamp()
         })
-    if len(t) != 0:
+    if len(t) != 0 \
+        and await is_tasks_newer(t, service.name):
         global last_tasks_cache
         last_tasks_cache[service.name] = t 
 
