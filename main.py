@@ -16,7 +16,7 @@ import re
 
 scraped = None
 
-exporter_mode = os.environ.get("EXPORTER_MODE", "swarm")
+exporter_mode = os.environ.get("EXPORTER_MODE", "docker")
 scrape_delay = float(os.environ.get("SCRAPE_DELAY", "10"))
 
 if exporter_mode == "swarm":
