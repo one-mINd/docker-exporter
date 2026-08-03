@@ -32,23 +32,6 @@ template = env.get_template(exporter_mode + '_metrics.j2')
 
 tasks_cache = {}
 
-# tasks_cache = {
-#     service-name:
-#         {
-#             tasks: [
-#                 id, id, id
-#             ]
-#             metrics: {
-#                 status_complete: N,
-#                 status_failed: N,
-#                 status_running: N,
-#                 status_complete_timestamp: N,
-#                 status_failed_timestamp: N,
-#                 status_running_timestamp: N
-#             }
-#         }
-# }
-
 async def scrape_containers_info():
     while True:
         global scraped
@@ -94,79 +77,73 @@ async def get_containers():
     return(t)
 
 async def update_tasks(service):
-    t = {}
-    for task in service.tasks():
-        t[task['ID']] = {
-            "status": task['Status']['State'],
-            "timestamp": isoparse(task['Status']['Timestamp']).timestamp()
-        }
-
     global tasks_cache
-    if service.name not in tasks_cache.keys():
+    if service.name not in tasks_cache:
         tasks_cache[service.name] = {
-            "tasks": [],
-            "metrics": {
-                "new": 0,
-                "new_timestamp": 0,
-                "pending": 0,
-                "pending_timestamp": 0,
-                "assigned": 0,
-                "assigned_timestamp": 0,
-                "accepted": 0,
-                "accepted_timestamp": 0,
-                "ready": 0,
-                "ready_timestamp": 0,
-                "preparing": 0,
-                "preparing_timestamp": 0,
-                "starting": 0,
-                "starting_timestamp": 0,
-                "running": 0,
-                "running_timestamp": 0,
-                "complete": 0,
-                "complete_timestamp": 0,
-                "failed": 0,
-                "failed_timestamp": 0,
-                "shutdown": 0,
-                "shutdown_timestamp": 0,
-                "rejected": 0,
-                "rejected_timestamp": 0,
-                "orphaned": 0,
-                "orphaned_timestamp": 0,
-                "remove": 0,
-                "remove_timestamp": 0,
-            }
+        "tasks": [],
+        "timestamps": {
+            "new_timestamp": 0,
+            "pending_timestamp": 0,
+            "assigned_timestamp": 0,
+            "accepted_timestamp": 0,
+            "ready_timestamp": 0,
+            "preparing_timestamp": 0,
+            "starting_timestamp": 0,
+            "running_timestamp": 0,
+            "complete_timestamp": 0,
+            "failed_timestamp": 0,
+            "shutdown_timestamp": 0,
+            "rejected_timestamp": 0,
+            "orphaned_timestamp": 0,
+            "remove_timestamp": 0,
         }
+    }
 
-    tasks_cache_ids = tasks_cache[service.name].get("tasks")
-    tasks_ids = list(t.keys())
-
-    for t_id in set(tasks_ids) - set(tasks_cache_ids):
-        status = t[t_id]
-        status_name = status["status"]
-        status_timestamp = status["timestamp"]
+    t = []
+    for task in service.tasks():
+        timestamp = isoparse(task['Status']['Timestamp']).timestamp()
+        t.append({
+            "id": task['ID'],
+            "status": task['Status']['State'],
+            "latest_timestamp": timestamp
+        })
         status_timestamp_name = f"{task['Status']['State']}_timestamp"
-        tasks_cache[service.name]["metrics"][status_name] += 1
-        tasks_cache[service.name]["metrics"][status_timestamp_name] = status_timestamp
+        if tasks_cache[service.name]["timestamps"][status_timestamp_name] < timestamp:
+            tasks_cache[service.name]["timestamps"][status_timestamp_name] = timestamp
 
-    for t_id in set(tasks_cache_ids) - set(tasks_ids):
-        tasks_cache[service.name]["tasks"].remove(t_id)
-    
+    if len(t) != 0:
+        tasks_cache[service.name]["tasks"] = t 
+    else:
+        tasks_cache[service.name]["tasks"] = [{
+            "id": "None",
+            "status": "None",
+            "latest_timestamp": "None"
+        }]
+
+async def sync_tasks_cache(services):
+    services = [s.name for s in services]
+    global tasks_cache
+    for service in tasks_cache.copy():
+        if service not in services:
+            tasks_cache.pop(service)
+
 async def get_services():
     cli = await get_docker_client()
     s = []
     try:
+        await sync_tasks_cache(cli.services.list())
         for service in cli.services.list():
             service_inspect = service.attrs
             if 'Replicated' in service_inspect["Spec"]["Mode"]:
                 replicas = service_inspect["Spec"]["Mode"]["Replicated"]["Replicas"]
             else: replicas = -1
             await update_tasks(service=service)
-            tasks = tasks_cache[service.name]["metrics"]
             s.append({
                 "name": service.name,
                 "image": service_inspect['Spec']['TaskTemplate']['ContainerSpec']['Image'],
                 "replicas": replicas,
-                "tasks_metrics": tasks,
+                "tasks": tasks_cache[service.name]["tasks"],
+                "tasks_timestamps": tasks_cache[service.name]["timestamps"],
                 "time": int(time.time())
             })
     except Exception as e:

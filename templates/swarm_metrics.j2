@@ -8,17 +8,19 @@ service_last_seen{service_name="{{ service.name }}",image="{{ service.image }}"}
 {%-for service in services%}
 service_replicas{service_name="{{ service.name }}",image="{{ service.image }}"} {{ service.replicas }}
 {%-endfor%}
-{%for status in statuses-%}
-# HELP task_status_{{ status }} The last status of task equals "{{ status }}"
+{%-for status in statuses%}
+# HELP task_status_{{ status }} The current status of task equals "{{ status }}"
 # TYPE task_status_{{ status }} gauge
 {%-for service in services%}
 {%-for task in service.tasks%}
 task_status_{{ status }}{service_name="{{ service.name }}",task_id="{{ task.id }}",image="{{ service.image }}"} {%if task.status == status%}1{%else%}0{%endif%}
 {%-endfor%}
 {%-endfor%}
-{%endfor%}
+{%-endfor%}
 {%- for service in services %}
-{%- for key, value in service.tasks_metrics.items() %}
+{%- for key, value in service.tasks_timestamps.items() %}
+# HELP task_status_{{ key }} The last timestamp of task equals "{{ key }}"
+# TYPE task_status_{{ key }} gauge
 task_status_{{ key }}{service_name="{{ service.name }}",image="{{ service.image }}"} {{ value }}
 {%- endfor %}
 {%- endfor %}
